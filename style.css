@@ -199,6 +199,21 @@ h2 {
   max-width: 68ch;
 }
 
+.project h3 {
+  font-family: "Fraunces", Georgia, serif;
+  font-weight: 600;
+  font-size: 1.15rem;
+  margin: 0 0 .4rem;
+  color: var(--ink);
+}
+
+.project p {
+  color: var(--ink-soft);
+  line-height: 1.6;
+  max-width: 68ch;
+  margin: 0 0 .7rem;
+}
+
 .links {
   display: flex;
   gap: 1.6rem;

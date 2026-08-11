@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bo Shen - HSR Asia</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/vendor/leaflet/leaflet.css">
+<style>
+  :root {
+    --bg: #ffffff;
+    --panel: #fafafa;
+    --ink: #111214;
+    --ink-soft: #6b6f76;
+    --line: #e6e7ea;
+    --accent: #c8312c;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); }
+  body {
+    color: var(--ink);
+    font-family: "Inter", -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  main { max-width: 1600px; margin: 0 auto; padding: 1.6rem 1.6rem 2rem; }
+
+  header { padding-bottom: .9rem; border-bottom: 1px solid var(--line); margin-bottom: 1rem;
+           display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:.5rem 1.5rem; }
+  .header-text { flex: 1 1 auto; min-width: 260px; }
+  .kicker { display:block; font-family:"IBM Plex Mono",monospace; font-size:.68rem; letter-spacing:.12em;
+            text-transform:uppercase; color: var(--ink-soft); margin-bottom:.35rem; }
+  h1 { font-size: clamp(1.3rem, 2.4vw, 1.6rem); font-weight: 700; letter-spacing: -0.01em; margin: 0; display:inline; }
+  .intro { color: var(--ink-soft); max-width: 62ch; margin: .3rem 0 0; line-height: 1.5; font-size: .86rem; }
+  .backlink { flex: 0 0 auto; font-family:"IBM Plex Mono",monospace; font-size:.75rem;
+              color: var(--ink-soft); text-decoration:none; border-bottom: 1px solid var(--line); padding-bottom:.15rem; }
+  .backlink:hover { color: var(--accent); border-color: var(--accent); }
+  .backlink::before { content:"← "; }
+
+  .tabs { display:flex; gap:0; margin-bottom: .6rem; border-bottom: 1px solid var(--line); }
+  .tab {
+    font-family:"IBM Plex Mono",monospace; font-size:.78rem; letter-spacing:.01em;
+    background:none; border:none; cursor:pointer; color: var(--ink-soft);
+    padding:.55rem 1.1rem .55rem 0; margin-right:1.4rem; border-bottom:2px solid transparent;
+  }
+  .tab:hover { color: var(--ink); }
+  .tab.active { color: var(--ink); border-bottom-color: var(--accent); }
+
+  .mapwrap { position:relative; border:1px solid var(--line); overflow:hidden;
+             height: calc(100vh - 11.5rem); min-height:480px; background: var(--panel); }
+  .mapview { position:absolute; inset:0; display:none; }
+  .mapview.active { display:block; }
+  .mapdiv { position:absolute; inset:0; }
+  .leaflet-container { background: var(--panel); font-family:"Inter",sans-serif; }
+
+  .legend {
+    background: #ffffff; color: var(--ink); border:1px solid var(--line);
+    padding:.75rem .9rem; font-size:.76rem; line-height:1.5; max-width:230px;
+  }
+  .legend h4 { margin:0 0 .45rem; font-size:.68rem; text-transform:uppercase; letter-spacing:.09em;
+               color: var(--ink-soft); font-weight:600; }
+  .legend .note { color: var(--ink-soft); font-size:.68rem; margin-top:.5rem; line-height:1.4; }
+  .legend-row { display:flex; align-items:center; gap:.5rem; margin:.15rem 0; }
+  .legend-swatch { width:26px; height:3px; flex:0 0 auto; }
+  .grad-bar { height:6px; margin:.3rem 0 .25rem; }
+  .grad-ticks { font-family:"IBM Plex Mono",monospace; font-size:.65rem; color: var(--ink-soft); }
+
+  .leaflet-popup-content-wrapper, .leaflet-popup-tip { background: #fff; color: var(--ink); border-radius: 2px; }
+  .leaflet-popup-content { font-family:"Inter",sans-serif; font-size:.82rem; line-height:1.5; margin:.7rem .85rem; min-width:200px; }
+  .leaflet-popup-content .pt { font-weight:600; font-size:.9rem; margin-bottom:.25rem; }
+  .leaflet-popup-content .row { display:flex; justify-content:space-between; gap:1rem; }
+  .leaflet-popup-content .row .v { font-weight:600; font-family:"IBM Plex Mono",monospace; font-size:.78rem; }
+  .leaflet-popup-content .meth { font-size:.68rem; color: var(--ink-soft); }
+  .leaflet-popup-content .blk { border-top:1px solid var(--line); margin-top:.45rem; padding-top:.45rem; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="header-text">
+      <span class="kicker">boshen24.github.io / projects</span>
+      <h1>HSR Asia — Affordability Atlas</h1>
+      <p class="intro">High-speed rail affordability across eight East &amp; Southeast Asian economies — service
+        density, fare per kilometre, and fare-to-income affordability, mapped network-wide.</p>
+    </div>
+    <a href="projects.html" class="backlink">Back to Projects</a>
+  </header>
+
+  <section id="hsr-asia-maps">
+    <div class="tabs">
+      <button class="tab active" data-tab="density">Service Density</button>
+      <button class="tab" data-tab="fare">Fare / km</button>
+      <button class="tab" data-tab="afford">Affordability</button>
+    </div>
+
+    <div class="mapwrap">
+      <div class="mapview active" id="view-density"><div class="mapdiv" id="map-density"></div></div>
+      <div class="mapview" id="view-fare"><div class="mapdiv" id="map-fare"></div></div>
+      <div class="mapview" id="view-afford"><div class="mapdiv" id="map-afford"></div></div>
+    </div>
+  </section>
+</main>
+
+<script src="assets/vendor/leaflet/leaflet.js"></script>
+<script src="assets/hsr-asia/hsr-asia.js"></script>
+</body>
+</html>
