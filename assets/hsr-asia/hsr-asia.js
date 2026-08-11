@@ -1,8 +1,12 @@
 (function () {
 "use strict";
 const DATA = "assets/hsr-asia/data/";
-const TILE_LIGHT = "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png";
-const TILE_ATTR  = '&copy; OSM &copy; CARTO';
+// Same extent as the paper's own base map (scripts/_fig_base.py MAIN_EXT).
+const MAIN_BOUNDS = [[16.0, 84.0], [48.2, 146.0]];
+// scripts/_fig_base.py GDP_CMAP — the one background ramp shared by all 3 paper figures.
+const BG_CMAP = ["#eef3f7", "#dae7f1", "#c2d8ea", "#a3c4e0", "#7dabd2", "#5990c2"];
+const LAND_FILL = "#e9edf1", LAND_LINE = "#9aa3ae";
+const BG_LINE = "#c2ccd6";
 
 function hx(h){ return [parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)]; }
 function rampColor(ramp, v) {
@@ -17,14 +21,66 @@ function rampColor(ramp, v) {
   }
   return ramp[ramp.length - 1][1];
 }
+// evenly-interpolated N-stop palette across [vmin,vmax] — mirrors
+// matplotlib's LinearSegmentedColormap + Normalize used in the paper scripts.
+function cmapRamp(colors, vmin, vmax) {
+  return colors.map((c, i) => [vmin + (i / (colors.length - 1)) * (vmax - vmin), c]);
+}
+function cmapColor(colors, vmin, vmax, v, log) {
+  if (v == null || isNaN(v) || v <= 0) return LAND_FILL;
+  const x = log ? Math.log(v) : v;
+  const x0 = log ? Math.log(vmin) : vmin, x1 = log ? Math.log(vmax) : vmax;
+  const t = Math.max(0, Math.min(1, (x - x0) / (x1 - x0)));
+  const ramp = cmapRamp(colors, 0, 1);
+  return rampColor(ramp, t);
+}
 function fmtUsd(v){ return v == null ? "—" : "$" + Number(v).toLocaleString("en-US",{maximumFractionDigits:0}); }
 
-const maps = {};
+// ---- shared, cached fetches (land + GDP/pop-density background used by all 3 tabs) ----
+const cache = {};
+function cachedFetch(name) {
+  if (!cache[name]) cache[name] = fetch(DATA + name).then(r => r.json());
+  return cache[name];
+}
+
 function makeMap(key) {
-  const map = L.map("map-" + key, { preferCanvas: true }).setView([20, 112], 4);
-  L.tileLayer(TILE_LIGHT, { maxZoom: 19, attribution: TILE_ATTR }).addTo(map);
-  maps[key] = map;
+  const map = L.map("map-" + key, { preferCanvas: true, minZoom: 3, maxZoom: 12, attributionControl: false });
+  map.fitBounds(MAIN_BOUNDS);
+  // the container's flex/absolute layout may not have a measured size yet on
+  // the very first tab at DOMContentLoaded time, which leaves Leaflet's canvas
+  // renderer sized to 0×0 until something calls invalidateSize().
+  requestAnimationFrame(() => map.invalidateSize());
+  setTimeout(() => map.invalidateSize(), 150);
+  window.addEventListener("load", () => map.invalidateSize());
+  L.control.attribution({ prefix: false }).addAttribution("Land: Natural Earth").addTo(map);
+  cachedFetch("land.geojson").then(gj => {
+    L.geoJSON(gj, { interactive: false, style: { fillColor: LAND_FILL, fillOpacity: 1, color: LAND_LINE, weight: 0.6 } })
+      .addTo(map).bringToBack();
+  });
   return map;
+}
+
+// value/log/domain shared by the two background variables
+const BG_VARS = {
+  gdp:  { field: "gdp_usd",     vmin: 4340,  vmax: 43381, log: false, label: "GDP per capita (US$)", ticks: [5000, 20000, 40000], fmt: v => "$" + Math.round(v/1000) + "k" },
+  pop:  { field: "pop_density", vmin: 8.8,   vmax: 8050,  log: true,  label: "Population density (/km², log)", ticks: [10, 100, 1000], fmt: v => v >= 1000 ? (v/1000)+"k" : String(v) },
+};
+function addBackground(map, varKey) {
+  const v = BG_VARS[varKey];
+  cachedFetch("gdp_per_capita_admin1.geojson").then(gj => {
+    L.geoJSON(gj, {
+      interactive: false,
+      style: f => {
+        const val = f.properties[v.field];
+        return { fillColor: val ? cmapColor(BG_CMAP, v.vmin, v.vmax, val, v.log) : LAND_FILL,
+                 fillOpacity: 1, color: BG_LINE, weight: 0.4 };
+      }
+    }).addTo(map);
+  });
+}
+function bgLegend(varKey) {
+  const v = BG_VARS[varKey];
+  return legendControl(gradientLegend(v.label, cmapRamp(BG_CMAP, v.vmin, v.vmax), v.ticks, v.fmt), { position: "bottomleft" });
 }
 
 function legendControl(html, opts) {
@@ -37,19 +93,21 @@ function legendControl(html, opts) {
   };
   return ctl;
 }
-function gradientLegend(title, stops, tickValues, tickFmt, note) {
+function gradientLegend(title, stops, tickValues, tickFmt, ends, note) {
   const vmin = stops[0][0], vmax = stops[stops.length - 1][0];
   const pct = v => ((v - vmin) / (vmax - vmin) * 100).toFixed(1) + "%";
   const grad = `linear-gradient(to right, ${stops.map(s => `${s[1]} ${pct(s[0])}`).join(",")})`;
   const ticks = tickValues.map(v => `<span style="position:absolute;left:${pct(v)};transform:translateX(-50%)">${tickFmt(v)}</span>`).join("");
+  const endRow = ends ? `<div class="grad-ends"><em>${ends[0]}</em><em>${ends[1]}</em></div>` : "";
   const rows = `<div class="grad-bar" style="background:${grad}"></div>
-    <div class="grad-ticks" style="position:relative;height:1.1em;">${ticks}</div>`;
+    <div class="grad-ticks" style="position:relative;height:1.1em;">${ticks}</div>${endRow}`;
   return `<h4>${title}</h4>${rows}${note ? `<div class="note">${note}</div>` : ""}`;
 }
 
 // ---------------- tabs / lazy init ----------------
 const initFns = { density: initDensity, fare: initFare, afford: initAfford };
 const done = {};
+const maps = {};
 document.querySelectorAll(".tab").forEach(btn => {
   btn.addEventListener("click", () => {
     const key = btn.dataset.tab;
@@ -68,26 +126,27 @@ document.addEventListener("DOMContentLoaded", () => {
 // ================= Density (Fig 1) =================
 function initDensity() {
   const map = makeMap("density");
+  maps.density = map;
+  addBackground(map, "pop");
+
   const BINS = [100, 200, 300];
   const COLORS = ["#e6b13a", "#ea580b", "#c8312c", "#4a0820"];
   const LABELS = ["< 100", "100 – 200", "200 – 300", "≥ 300"];
   function colorT(v) { let i = 0; while (i < BINS.length && v >= BINS[i]) i++; return COLORS[i]; }
 
-  fetch(DATA + "intl_train_density.geojson").then(r => r.json()).then(gj => {
-    gj.features.sort((a, b) => (a.properties.daily_trains || 0) - (b.properties.daily_trains || 0));
-    const layer = L.geoJSON(gj, {
-      style: f => ({ color: colorT(f.properties.daily_trains || 0), weight: 2.4, opacity: 0.92, lineCap: "round" }),
+  cachedFetch("intl_train_density.geojson").then(gj => {
+    gj = { type: "FeatureCollection", features: [...gj.features].sort((a, b) => (a.properties.daily_trains || 0) - (b.properties.daily_trains || 0)) };
+    L.geoJSON(gj, {
+      style: f => ({ color: colorT(f.properties.daily_trains || 0), weight: 2.2, opacity: 0.95, lineCap: "round" }),
       onEachFeature: (f, l) => {
         l.bindTooltip(`${(f.properties.daily_trains || 0).toFixed(1)} trains/day`, { sticky: true });
-        l.on("mouseover", e => e.target.setStyle({ weight: 5 }));
-        l.on("mouseout", e => e.target.setStyle({ weight: 2.4 }));
+        l.on("mouseover", e => e.target.setStyle({ weight: 4.5 }));
+        l.on("mouseout", e => e.target.setStyle({ weight: 2.2 }));
       }
     }).addTo(map);
-    const b = layer.getBounds();
-    if (b.isValid()) map.fitBounds(b, { padding: [30, 30] });
   });
 
-  fetch(DATA + "intl_station_stops.geojson").then(r => r.json()).then(gj => {
+  cachedFetch("intl_station_stops.geojson").then(gj => {
     const stopR = z => z < 8 ? 0 : Math.min(12, 2 + 1.6 * (z - 8));
     const layer = L.geoJSON(gj, {
       pointToLayer: (f, ll) => L.circleMarker(ll, { radius: stopR(map.getZoom()), color: "#8a8f98", weight: 1.1, fillColor: "#fff", fillOpacity: 0.95 }),
@@ -97,41 +156,23 @@ function initDensity() {
   });
 
   const rows = COLORS.map((c, i) => `<div class="legend-row"><div class="legend-swatch" style="background:${c}"></div><span>${LABELS[i]}</span></div>`).join("");
-  legendControl(`<h4>Trains / day</h4>${rows}<div class="note">Colour = combined daily service count on each track section, merged across parallel/overlapping routes.</div>`).addTo(map);
+  legendControl(`<h4>Trains / day</h4>${rows}<div class="note">Combined daily service count on each track section, merged across parallel/overlapping routes.</div>`).addTo(map);
+  bgLegend("pop").addTo(map);
 }
 
 // ================= Fare (Fig 3) =================
 function initFare() {
   const map = makeMap("fare");
+  maps.fare = map;
+  addBackground(map, "gdp");
+
   const RAMP = [[0.030,"#1a9850"],[0.060,"#66bd63"],[0.110,"#fee08b"],[0.150,"#fc8d59"],
                 [0.185,"#fc4e2a"],[0.220,"#e31a1c"],[0.260,"#b10026"],[0.300,"#67001f"]];
   const SYM = { KRW: "₩", TWD: "NT$", MYR: "RM", IDR: "Rp", CNY: "¥", JPY: "¥" };
-  const HSFILE = { "South Korea": "south_korea", "Taiwan": "taiwan", "Indonesia": "indonesia", "Malaysia": "malaysia" };
 
-  fetch(DATA + "gdp_per_capita_admin1.geojson").then(r => r.json()).then(gj => {
-    const GDP_STOPS = [[0,"#67000d"],[10000,"#ef3b2c"],[20000,"#fc9272"],[30000,"#fdd0bd"],[40000,"#fff5f0"],[50000,"#08306b"]];
+  cachedFetch("fare_segments_all.geojson").then(gj => {
+    gj = { type: "FeatureCollection", features: [...gj.features].sort((a, b) => (a.properties.usd_per_km || 0) - (b.properties.usd_per_km || 0)) };
     L.geoJSON(gj, {
-      interactive: false,
-      style: f => ({ fillColor: rampColor(GDP_STOPS, f.properties.gdp_usd), fillOpacity: 0.12, color: "#cccccc", weight: 0.3, opacity: 0.4 })
-    }).addTo(map).bringToBack();
-  });
-
-  Object.keys(HSFILE).forEach(c => {
-    fetch(`${DATA}${HSFILE[c]}_railway_high_speed_lines.geojson`).then(r => r.json()).then(gj => {
-      L.geoJSON(gj, { interactive: false, style: { color: "#9aa3ad", weight: 1.2, opacity: 0.55 } }).addTo(map).bringToBack();
-    }).catch(() => {});
-    fetch(`${DATA}${HSFILE[c]}_railway_high_speed_stations.geojson`).then(r => r.json()).then(gj => {
-      L.geoJSON(gj, { pointToLayer: (f, ll) => {
-        const m = L.circleMarker(ll, { radius: 3, color: "#8a8f98", fillColor: "#fff", fillOpacity: 0.9, weight: 1 });
-        m.bindTooltip(f.properties.name_zh || f.properties.name_en || f.properties.name || "", { direction: "top" });
-        return m;
-      }}).addTo(map);
-    }).catch(() => {});
-  });
-
-  fetch(DATA + "fare_segments_all.geojson").then(r => r.json()).then(gj => {
-    gj.features.sort((a, b) => (a.properties.usd_per_km || 0) - (b.properties.usd_per_km || 0));
-    const layer = L.geoJSON(gj, {
       style: f => ({ color: rampColor(RAMP, f.properties.usd_per_km), weight: 3, opacity: 0.95, lineCap: "round" }),
       onEachFeature: (f, l) => {
         const p = f.properties;
@@ -147,44 +188,36 @@ function initFare() {
         l.on("mouseout", e => e.target.setStyle({ weight: 3 }));
       }
     }).addTo(map);
-    const b = layer.getBounds();
-    if (b.isValid()) map.fitBounds(b, { padding: [30, 30] });
   });
 
-  legendControl(gradientLegend("Fare (US$ / km)", RAMP, [0.03, 0.15, 0.30], v => "$" + v.toFixed(2),
-    "Colour = each priced segment's fare per kilometre, in US dollars. Click a line for its local-currency fare.")).addTo(map);
+  legendControl(gradientLegend("Fare (US$ / km)", RAMP, [0.05,0.10,0.15,0.20,0.25,0.30], v => v.toFixed(2),
+    ["cheaper", "pricier"])).addTo(map);
+  bgLegend("gdp").addTo(map);
 }
 
 // ================= Affordability (Fig 4) =================
 function initAfford() {
   const map = makeMap("afford");
+  maps.afford = map;
+  addBackground(map, "gdp");
+
   const RAMP = [[0.12,"#0e7a38"],[0.39,"#46ad52"],[0.66,"#f2c200"],[0.93,"#ef7d2e"],[1.20,"#c81e24"]];
 
-  fetch(DATA + "gdp_per_capita_admin1.geojson").then(r => r.json()).then(gj => {
-    const GDP_STOPS = [[0,"#67000d"],[10000,"#ef3b2c"],[20000,"#fc9272"],[30000,"#fdd0bd"],[40000,"#fff5f0"],[50000,"#08306b"]];
+  cachedFetch("affordability_gradient.geojson").then(gj => {
     L.geoJSON(gj, {
-      interactive: false,
-      style: f => ({ fillColor: rampColor(GDP_STOPS, f.properties.gdp_usd), fillOpacity: 0.12, color: "#cccccc", weight: 0.3, opacity: 0.4 })
-    }).addTo(map).bringToBack();
-  });
-
-  fetch(DATA + "affordability_gradient.geojson").then(r => r.json()).then(gj => {
-    const layer = L.geoJSON(gj, {
       interactive: false,
       style: f => ({ color: rampColor(RAMP, f.properties.afford_pct), weight: 3, opacity: 0.95, lineCap: "round" })
     }).addTo(map);
-    const b = layer.getBounds();
-    if (b.isValid()) map.fitBounds(b, { padding: [30, 30] });
   });
 
-  fetch(DATA + "affordability_stations.geojson").then(r => r.json()).then(gj => {
+  cachedFetch("affordability_stations.geojson").then(gj => {
     L.geoJSON(gj, {
       pointToLayer: (f, ll) => L.circleMarker(ll, { radius: 3.2, color: "#333", weight: 1, fillColor: "#fff", fillOpacity: 1 }),
       onEachFeature: (feat, lyr) => {
         const p = feat.properties;
         const segs = (p.segments || []).slice().sort((a, b) => b.afford_pct - a.afford_pct)
           .map(s => `<div class="row"><span>${s.line || ""}</span><span class="v" style="color:${rampColor(RAMP, s.afford_pct)}">${s.afford_pct.toFixed(3)}%</span></div>`).join("");
-        lyr.bindPopup(`<div class="pt">${p.name_zh || p.name || ""} <span style="font-weight:400;color:var(--ink-faint)">${p.name_en || ""}</span></div>
+        lyr.bindPopup(`<div class="pt">${p.name_zh || p.name || ""} <span style="font-weight:400;color:var(--ink-soft)">${p.name_en || ""}</span></div>
           <div class="row"><span>${p.country}</span><span class="v">${p.region || "—"}</span></div>
           <div class="row"><span>GDP / capita</span><span class="v">${fmtUsd(p.gdp_usd)}</span></div>
           <div class="blk">${segs || '<div class="meth">no priced segment</div>'}</div>`);
@@ -195,6 +228,8 @@ function initAfford() {
   });
 
   legendControl(gradientLegend("Affordability", RAMP, [0.3, 0.7, 1.0], v => v.toFixed(1) + "%",
-    "Cost of a 100 km trip as % of local monthly GDP per capita — lower is more affordable. Click a station for its GDP and every through-segment.")).addTo(map);
+    ["more affordable", "less affordable"],
+    "Cost of a 100 km trip as % of local monthly GDP per capita.")).addTo(map);
+  bgLegend("gdp").addTo(map);
 }
 })();

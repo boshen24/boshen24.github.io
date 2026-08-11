@@ -11,11 +11,12 @@
 <style>
   :root {
     --bg: #ffffff;
-    --panel: #fafafa;
+    --panel: #ffffff;
     --ink: #111214;
     --ink-soft: #6b6f76;
     --line: #e6e7ea;
     --accent: #c8312c;
+    --border-strong: #5b6670;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; background: var(--bg); }
@@ -55,16 +56,19 @@
   .leaflet-container { background: var(--panel); font-family:"Inter",sans-serif; }
 
   .legend {
-    background: #ffffff; color: var(--ink); border:1px solid var(--line);
-    padding:.75rem .9rem; font-size:.76rem; line-height:1.5; max-width:230px;
+    background: #ffffff; color: var(--ink); border:1.5px solid var(--border-strong);
+    padding:.7rem .85rem; font-size:.76rem; line-height:1.5; max-width:220px;
   }
-  .legend h4 { margin:0 0 .45rem; font-size:.68rem; text-transform:uppercase; letter-spacing:.09em;
-               color: var(--ink-soft); font-weight:600; }
+  .legend + .legend { margin-bottom: .6rem; }
+  .legend h4 { margin:0 0 .45rem; font-size:.72rem; letter-spacing:.01em;
+               color: var(--ink); font-weight:700; }
   .legend .note { color: var(--ink-soft); font-size:.68rem; margin-top:.5rem; line-height:1.4; }
   .legend-row { display:flex; align-items:center; gap:.5rem; margin:.15rem 0; }
   .legend-swatch { width:26px; height:3px; flex:0 0 auto; }
-  .grad-bar { height:6px; margin:.3rem 0 .25rem; }
+  .grad-bar { height:8px; margin:.3rem 0 .2rem; border:1px solid rgba(0,0,0,.15); }
   .grad-ticks { font-family:"IBM Plex Mono",monospace; font-size:.65rem; color: var(--ink-soft); }
+  .grad-ends { display:flex; justify-content:space-between; font-size:.68rem; color: var(--ink-soft);
+               font-style:italic; margin-top:.3rem; }
 
   .leaflet-popup-content-wrapper, .leaflet-popup-tip { background: #fff; color: var(--ink); border-radius: 2px; }
   .leaflet-popup-content { font-family:"Inter",sans-serif; font-size:.82rem; line-height:1.5; margin:.7rem .85rem; min-width:200px; }
