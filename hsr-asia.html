@@ -40,17 +40,20 @@
   .backlink::before { content:"← "; }
 
   /* ---- toolbar: search + two independent layer pickers ---- */
-  .toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:.9rem 1.4rem; margin-bottom: .7rem; }
+  .toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:.7rem 1rem; margin-bottom: .7rem; }
   .field-group { display:flex; flex-direction:column; gap:.3rem; }
   .field-label { font-family:"IBM Plex Mono",monospace; font-size:.62rem; letter-spacing:.1em; text-transform:uppercase; color: var(--ink-soft); }
   .segmented { display:inline-flex; border:1px solid var(--line); border-radius:6px; overflow:hidden; }
   .segmented button {
-    font-family:"Inter",sans-serif; font-size:.78rem; background:#fff; color: var(--ink-soft);
-    border:none; padding:.4rem .7rem; cursor:pointer; border-right:1px solid var(--line);
+    font-family:"Inter",sans-serif; font-size:.74rem; background:#fff; color: var(--ink-soft);
+    border:none; padding:.32rem .5rem; cursor:pointer; border-right:1px solid var(--line);
+    display:inline-flex; align-items:center; gap:.3rem;
   }
   .segmented button:last-child { border-right:none; }
   .segmented button:hover { color: var(--ink); background:#f5f5f6; }
   .segmented button.active { background: var(--ink); color:#fff; }
+  .btn-icon { width:14px; height:14px; flex:0 0 auto; display:block; }
+  .segmented button.active .btn-icon line { stroke: #fff; }
 
   .search-wrap { position:relative; flex: 1 1 220px; max-width:280px; }
   .search-input {
@@ -68,16 +71,28 @@
   .search-result:hover, .search-result.hi { background:#f5f5f6; }
   .search-result .sub { color: var(--ink-soft); font-size:.7rem; }
 
+  /* ---- multi-select chips (currency / language) — always visible, no dropdown ---- */
+  .chip-group { display:grid; gap:.3rem; }
+  #currency-chips { grid-template-columns: repeat(4, 1fr); }
+  #language-chips { grid-template-columns: repeat(3, 1fr); }
+  .chip {
+    font-family:"Inter",sans-serif; font-size:.7rem; background:#fff; color: var(--ink-soft);
+    border:1px solid var(--line); border-radius:12px; padding:.24rem .5rem; cursor:pointer;
+    text-align:center; white-space:nowrap;
+  }
+  .chip:hover { border-color: var(--border-strong); color: var(--ink); }
+  .chip.active { background: var(--ink); color:#fff; border-color: var(--ink); }
+
   .mapwrap { position:relative; border:1px solid var(--line); overflow:hidden;
              height: calc(100vh - 14.5rem); min-height:440px; background: var(--panel); }
   .mapdiv { position:absolute; inset:0; }
   .leaflet-container { background: var(--panel); font-family:"Inter",sans-serif; }
 
   .legend {
-    background: #ffffff; color: var(--ink); border:1.5px solid var(--border-strong);
-    padding:.7rem .85rem; font-size:.76rem; line-height:1.5; max-width:220px;
+    background: #ffffff; color: var(--ink); border:1px solid var(--border-strong);
+    padding:.85rem 1rem; font-size:.76rem; line-height:1.6; width:232px;
   }
-  .legend h4 { margin:0 0 .45rem; font-size:.72rem; letter-spacing:.01em;
+  .legend h4 { margin:0 0 .55rem; font-size:.72rem; letter-spacing:.01em;
                color: var(--ink); font-weight:700; }
   .legend .note { color: var(--ink-soft); font-size:.68rem; margin-top:.5rem; line-height:1.4; }
   .legend-row { display:flex; align-items:center; gap:.5rem; margin:.15rem 0; }
@@ -88,13 +103,21 @@
                font-style:italic; margin-top:.3rem; }
 
   .leaflet-popup-content-wrapper, .leaflet-popup-tip { background: #fff; color: var(--ink); border-radius: 2px; }
-  .leaflet-popup-content { font-family:"Inter",sans-serif; font-size:.82rem; line-height:1.5; margin:.7rem .85rem; min-width:200px; }
-  .leaflet-popup-content .pt { font-weight:600; font-size:.9rem; margin-bottom:.25rem; }
-  .leaflet-popup-content .pt .local { font-weight:400; color: var(--ink-soft); font-size:.78rem; }
-  .leaflet-popup-content .row { display:flex; justify-content:space-between; gap:1rem; }
-  .leaflet-popup-content .row .v { font-weight:600; font-family:"IBM Plex Mono",monospace; font-size:.78rem; }
-  .leaflet-popup-content .meth { font-size:.68rem; color: var(--ink-soft); }
-  .leaflet-popup-content .blk { border-top:1px solid var(--line); margin-top:.45rem; padding-top:.45rem; }
+  .leaflet-tooltip { background: #fff; border: 1px solid var(--border-strong); border-radius: 3px;
+                      color: var(--ink); box-shadow: 0 3px 10px rgba(0,0,0,.12); }
+  .leaflet-tooltip-top:before { border-top-color: var(--border-strong); }
+  .leaflet-popup-content, .leaflet-tooltip {
+    font-family:"Inter",sans-serif; font-size:.82rem; line-height:1.5;
+  }
+  .leaflet-popup-content { margin:.7rem .85rem; min-width:200px; }
+  .leaflet-tooltip { padding:.5rem .65rem; }
+  .pt { font-weight:600; font-size:.9rem; margin-bottom:.3rem; }
+  .pt .unit { font-weight:400; color: var(--ink-soft); font-size:.76rem; }
+  .pt .local, .local { font-weight:400; color: var(--ink-soft); font-size:.78rem; }
+  .row { display:flex; justify-content:space-between; gap:1rem; }
+  .row .v { font-weight:600; font-family:"IBM Plex Mono",monospace; font-size:.78rem; text-align:right; }
+  .meth { font-size:.68rem; color: var(--ink-soft); }
+  .blk { border-top:1px solid var(--line); margin-top:.45rem; padding-top:.45rem; }
 </style>
 </head>
 <body>
@@ -103,33 +126,103 @@
     <div class="header-text">
       <span class="kicker">boshen24.github.io / projects</span>
       <h1>HSR Asia — Affordability Atlas</h1>
-      <p class="intro">High-speed rail affordability across eight East &amp; Southeast Asian economies — service
-        density, fare per kilometre, and fare-to-income affordability, mapped network-wide.</p>
+      <p class="intro">HSR affordability across eight East &amp; Southeast Asian economies.</p>
     </div>
     <a href="projects.html" class="backlink">Back to Projects</a>
   </header>
 
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <linearGradient id="grad-pop" x1="0" y1="1" x2="1" y2="0">
+        <stop offset="0" stop-color="#c2d8ea"/><stop offset="1" stop-color="#4a7fad"/>
+      </linearGradient>
+      <linearGradient id="grad-gdp" x1="0" y1="1" x2="1" y2="0">
+        <stop offset="0" stop-color="#c2d8ea"/><stop offset="1" stop-color="#4a7fad"/>
+      </linearGradient>
+      <linearGradient id="grad-density" x1="0" y1="1" x2="1" y2="0">
+        <stop offset="0" stop-color="#e6b13a"/><stop offset="1" stop-color="#4a0820"/>
+      </linearGradient>
+      <linearGradient id="grad-fare" x1="0" y1="1" x2="1" y2="0">
+        <stop offset="0" stop-color="#1a9850"/><stop offset="1" stop-color="#67001f"/>
+      </linearGradient>
+      <linearGradient id="grad-afford" x1="0" y1="1" x2="1" y2="0">
+        <stop offset="0" stop-color="#0e7a38"/><stop offset="1" stop-color="#c81e24"/>
+      </linearGradient>
+    </defs>
+  </svg>
+
   <div class="toolbar">
     <div class="search-wrap">
       <div class="field-label">Search a station</div>
-      <input class="search-input" id="station-search" type="text" placeholder="e.g. Guangzhou South, Tokyo…" autocomplete="off">
+      <input class="search-input" id="station-search" type="text" placeholder="e.g. Guangzhounan, Tokyo…" autocomplete="off">
       <div class="search-results" id="search-results"></div>
     </div>
     <div class="field-group">
       <div class="field-label">Background</div>
       <div class="segmented" id="bg-picker">
-        <button data-bg="pop" class="active">Population density</button>
-        <button data-bg="gdp">GDP per capita</button>
+        <button data-bg="pop" class="active">
+          <svg class="btn-icon" viewBox="0 0 20 20">
+            <circle cx="4.5" cy="15.5" r="1.8" fill="url(#grad-pop)"/>
+            <circle cx="10.5" cy="10.5" r="3" fill="url(#grad-pop)"/>
+            <circle cx="16" cy="5.5" r="4.3" fill="url(#grad-pop)"/>
+          </svg>
+          Population density
+        </button>
+        <button data-bg="gdp">
+          <svg class="btn-icon" viewBox="0 0 20 20">
+            <rect x="2.5" y="13" width="3.6" height="5" fill="url(#grad-gdp)"/>
+            <rect x="8.2" y="8.5" width="3.6" height="9.5" fill="url(#grad-gdp)"/>
+            <rect x="13.9" y="2.5" width="3.6" height="15.5" fill="url(#grad-gdp)"/>
+          </svg>
+          GDP per capita
+        </button>
       </div>
     </div>
     <div class="field-group">
       <div class="field-label">Rail network</div>
       <div class="segmented" id="rail-picker">
-        <button data-rail="plain" class="active">Plain</button>
-        <button data-rail="density">Service density</button>
-        <button data-rail="fare">Fare / km</button>
-        <button data-rail="afford">Affordability</button>
+        <button data-rail="plain" class="active">
+          <svg class="btn-icon" viewBox="0 0 20 20">
+            <line x1="2" y1="6.5" x2="18" y2="6.5" stroke="#3a3f45" stroke-width="1.8"/>
+            <line x1="2" y1="13.5" x2="18" y2="13.5" stroke="#3a3f45" stroke-width="1.8"/>
+            <line x1="4.5" y1="4" x2="4.5" y2="16" stroke="#3a3f45" stroke-width="1.4"/>
+            <line x1="8.8" y1="4" x2="8.8" y2="16" stroke="#3a3f45" stroke-width="1.4"/>
+            <line x1="13.1" y1="4" x2="13.1" y2="16" stroke="#3a3f45" stroke-width="1.4"/>
+            <line x1="17.4" y1="4" x2="17.4" y2="16" stroke="#3a3f45" stroke-width="1.4"/>
+          </svg>
+          Plain
+        </button>
+        <button data-rail="density">
+          <svg class="btn-icon" viewBox="0 0 20 20">
+            <rect x="2" y="14" width="3" height="4.5" fill="url(#grad-density)"/>
+            <rect x="7" y="10" width="3" height="8.5" fill="url(#grad-density)"/>
+            <rect x="12" y="6" width="3" height="12.5" fill="url(#grad-density)"/>
+            <rect x="17" y="1.5" width="3" height="17" fill="url(#grad-density)"/>
+          </svg>
+          Train pairs
+        </button>
+        <button data-rail="fare">
+          <svg class="btn-icon" viewBox="0 0 20 20">
+            <path d="M2 9 L9 2 H17.5 V10.5 L10.5 17.5 Z" fill="url(#grad-fare)"/>
+            <circle cx="13.7" cy="5.8" r="1.5" fill="#fff"/>
+          </svg>
+          Unit fare
+        </button>
+        <button data-rail="afford">
+          <svg class="btn-icon" viewBox="0 0 20 20">
+            <text x="10" y="15.5" font-size="15" font-weight="700" text-anchor="middle" font-family="Inter, sans-serif" fill="url(#grad-afford)">%</text>
+          </svg>
+          Affordability
+        </button>
       </div>
+    </div>
+    <div class="field-group">
+      <div class="field-label">Currency</div>
+      <div class="chip-group" id="currency-chips"></div>
+    </div>
+    <div class="field-group">
+      <div class="field-label">Language</div>
+      <div class="chip-group" id="language-chips"></div>
     </div>
   </div>
 

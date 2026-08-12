@@ -28,9 +28,97 @@ function cmapColor(colors, vmin, vmax, v, log) {
   const t = Math.max(0, Math.min(1, (x - x0) / (x1 - x0)));
   return rampColor(cmapRamp(colors, 0, 1), t);
 }
-function fmtUsd(v){ return v == null ? "—" : "$" + Number(v).toLocaleString("en-US",{maximumFractionDigits:0}); }
-// "English (Local)" — falls back to just the local name when no translation exists.
-function biName(en, local) { return en && en !== local ? `${en} <span class="local">(${local})</span>` : (en || local || ""); }
+// ================= currency & language selectors =================
+const CURRENCIES = [
+  { code: "USD", label: "USD" },
+  { code: "LOCAL", label: "Local" },
+  { code: "CNY", label: "CNY" },
+  { code: "TWD", label: "TWD" },
+  { code: "KRW", label: "KRW" },
+  { code: "JPY", label: "JPY" },
+  { code: "MYR", label: "MYR" },
+  { code: "IDR", label: "IDR" },
+];
+// Units of currency per 1 USD, 2025-12-31 US Treasury basis (same rates the paper itself uses).
+const RATES = { USD: 1, KRW: 1444, TWD: 31.3, MYR: 4.06, IDR: 16650, CNY: 7.00, JPY: 156.6 };
+const CSYM = { USD: "$", KRW: "₩", TWD: "NT$", MYR: "RM", IDR: "Rp", CNY: "¥", JPY: "¥" };
+const selectedCurrencies = new Set(["USD", "LOCAL"]);
+
+function fmtAmount(code, v) {
+  const decimals = v >= 100 ? 0 : v >= 10 ? 1 : v >= 1 ? 2 : 3;
+  return (CSYM[code] || "") + v.toLocaleString("en-US", { maximumFractionDigits: decimals });
+}
+// One row per selected currency, deduped when "Local" resolves to an explicitly-picked code too.
+function currencyRows(p) {
+  const seen = new Set();
+  const rows = [];
+  CURRENCIES.forEach(c => {
+    if (!selectedCurrencies.has(c.code)) return;
+    const code = c.code === "LOCAL" ? p.currency : c.code;
+    if (!code || seen.has(code)) return;
+    seen.add(code);
+    const amount = (code === p.currency && p.local_per_km != null) ? p.local_per_km : (p.usd_per_km || 0) * (RATES[code] || 1);
+    rows.push({ label: c.code === "LOCAL" ? "Local" : code, text: fmtAmount(code, amount) + "/km" });
+  });
+  return rows;
+}
+
+const LANGUAGES = [
+  { code: "en", label: "English" },
+  { code: "local", label: "Local" },
+  { code: "hans", label: "简体" },
+  { code: "hant", label: "繁體" },
+  { code: "ko", label: "한국어" },
+  { code: "ja", label: "日本語" },
+];
+const selectedLangs = new Set(["en", "local"]);
+
+// Renders every selected language actually available for this record — never fabricates
+// a translation. hans/hant only exist for China/Taiwan (Simplified/Traditional Chinese are
+// real deterministic script conversions); ko/ja just surface the native name when the
+// record's own country matches — there is no live translation into Korean or Japanese.
+function nameVariants(rec) {
+  const seen = new Set();
+  const out = [];
+  const push = s => { if (s && !seen.has(s)) { seen.add(s); out.push(s); } };
+  if (selectedLangs.has("en") && rec.en) push(rec.en);
+  if (selectedLangs.has("local") && rec.local) push(rec.local);
+  if (selectedLangs.has("hans") && rec.hans) push(rec.hans);
+  if (selectedLangs.has("hant") && rec.hant) push(rec.hant);
+  if (selectedLangs.has("ko") && rec.country === "South Korea" && rec.local) push(rec.local);
+  if (selectedLangs.has("ja") && rec.country === "Japan" && rec.local) push(rec.local);
+  return out.length ? out.join(" / ") : (rec.local || rec.en || "");
+}
+
+let currentRail = null;
+function refreshTooltips() {
+  if (currentRail) setRail(currentRail);
+  if (lastStation && searchMarker) {
+    searchMarker.setPopupContent(`<div class="pt">${nameVariants(lastStation)}</div><div class="row"><span>${lastStation.country}</span></div>`);
+  }
+}
+// Always-visible toggle chips (no dropdown) — click a chip to add/remove it
+// from the selection; at least one stays selected at all times.
+function wireChipGroup(containerId, options, selectedSet, onChange) {
+  const container = document.getElementById(containerId);
+  container.innerHTML = options.map(o =>
+    `<button type="button" class="chip${selectedSet.has(o.code) ? " active" : ""}" data-code="${o.code}">${o.label}</button>`
+  ).join("");
+  container.addEventListener("click", e => {
+    const chip = e.target.closest(".chip");
+    if (!chip) return;
+    const code = chip.dataset.code;
+    if (selectedSet.has(code)) {
+      if (selectedSet.size === 1) return; // keep at least one selected
+      selectedSet.delete(code);
+      chip.classList.remove("active");
+    } else {
+      selectedSet.add(code);
+      chip.classList.add("active");
+    }
+    onChange();
+  });
+}
 
 const cache = {};
 function cachedFetch(name) {
@@ -44,7 +132,10 @@ map.fitBounds(MAIN_BOUNDS);
 requestAnimationFrame(() => map.invalidateSize());
 setTimeout(() => map.invalidateSize(), 150);
 window.addEventListener("load", () => map.invalidateSize());
-L.control.attribution({ prefix: false }).addAttribution("Land: Natural Earth").addTo(map);
+L.control.attribution({ prefix: false })
+  .addAttribution("Land: Natural Earth")
+  .addAttribution("Rail network: OpenStreetMap contributors")
+  .addTo(map);
 
 cachedFetch("land.geojson").then(gj => {
   L.geoJSON(gj, { interactive: false, style: { fillColor: LAND_FILL, fillOpacity: 1, color: LAND_LINE, weight: 0.6 } })
@@ -54,9 +145,11 @@ cachedFetch("land.geojson").then(gj => {
 // ================= background layer (Population density / GDP per capita) =================
 const BG_VARS = {
   pop: { field: "pop_density", vmin: 8.8, vmax: 8050, log: true, label: "Population density (/km², log)",
-         ticks: [10, 100, 1000], fmt: v => v >= 1000 ? (v/1000)+"k" : String(v) },
+         ticks: [10, 100, 1000], fmt: v => v >= 1000 ? (v/1000)+"k" : String(v),
+         source: "National censuses &amp; statistical offices, 2024." },
   gdp: { field: "gdp_usd", vmin: 4340, vmax: 43381, log: false, label: "GDP per capita (US$)",
-         ticks: [5000, 20000, 40000], fmt: v => "$" + Math.round(v/1000) + "k" },
+         ticks: [5000, 20000, 40000], fmt: v => "$" + Math.round(v/1000) + "k",
+         source: "National/subnational GDP accounts, 2024 (current US$)." },
 };
 let bgLayer = null;
 function setBackground(key) {
@@ -74,7 +167,7 @@ function setBackground(key) {
     if (railLayer) railLayer.bringToFront();
     if (stationLayer) stationLayer.bringToFront();
   });
-  bgLegendCtl.update(gradientLegend(v.label, cmapRamp(BG_CMAP, v.vmin, v.vmax), v.ticks, v.fmt));
+  bgLegendCtl.update(gradientLegend(v.label, cmapRamp(BG_CMAP, v.vmin, v.vmax), v.ticks, v.fmt, null, v.source));
 }
 
 // ================= legend controls =================
@@ -82,7 +175,7 @@ function legendControl(opts) {
   const ctl = L.control(opts);
   let el = null;
   ctl.onAdd = function () {
-    el = L.DomUtil.create("div", "legend");
+    el = L.DomUtil.create("div", "legend leaflet-control");
     L.DomEvent.disableClickPropagation(el);
     return el;
   };
@@ -112,7 +205,6 @@ const DENSITY_COLORS = ["#e6b13a", "#ea580b", "#c8312c", "#4a0820"];
 const FARE_RAMP = [[0.030,"#1a9850"],[0.060,"#66bd63"],[0.110,"#fee08b"],[0.150,"#fc8d59"],
                    [0.185,"#fc4e2a"],[0.220,"#e31a1c"],[0.260,"#b10026"],[0.300,"#67001f"]];
 const AFFORD_RAMP = [[0.12,"#0e7a38"],[0.39,"#46ad52"],[0.66,"#f2c200"],[0.93,"#ef7d2e"],[1.20,"#c81e24"]];
-const SYM = { KRW: "₩", TWD: "NT$", MYR: "RM", IDR: "Rp", CNY: "¥", JPY: "¥" };
 
 let railLayer = null, stationLayer = null;
 function clearRail() {
@@ -121,6 +213,7 @@ function clearRail() {
 }
 
 function setRail(key) {
+  currentRail = key;
   clearRail();
   if (key === "plain" || key === "density") {
     cachedFetch("intl_train_density.geojson").then(gj => {
@@ -134,28 +227,27 @@ function setRail(key) {
           return { color: DENSITY_COLORS[i], weight: 2.2, opacity: 0.95, lineCap: "round" };
         },
         onEachFeature: (f, l) => {
-          if (key === "density") l.bindTooltip(`${(f.properties.daily_trains || 0).toFixed(1)} trains/day`, { sticky: true });
-          l.on("mouseover", e => e.target.setStyle({ weight: key === "plain" ? 3.5 : 4.5 }));
-          l.on("mouseout", e => e.target.setStyle({ weight: key === "plain" ? 2 : 2.2 }));
+          if (key === "density") l.bindTooltip(`${(f.properties.daily_trains || 0).toFixed(1)} train pairs/day`, { sticky: true });
         }
       }).addTo(map);
     });
     cachedFetch("intl_station_stops.geojson").then(gj => {
-      const stopR = z => z < 8 ? 0 : Math.min(12, 2 + 1.6 * (z - 8));
+      const stopR = z => z < 8 ? 0 : Math.min(7, 1.2 + (z - 8));
       stationLayer = L.geoJSON(gj, {
-        pointToLayer: (f, ll) => L.circleMarker(ll, { radius: stopR(map.getZoom()), color: "#8a8f98", weight: 1.1, fillColor: "#fff", fillOpacity: 0.95 }),
+        pointToLayer: (f, ll) => L.circleMarker(ll, { radius: stopR(map.getZoom()), color: "#8a8f98", weight: 1, fillColor: "#fff", fillOpacity: 0.95 }),
         onEachFeature: (f, l) => {
-          const en = f.properties.name_en, local = f.properties.name;
-          l.bindTooltip(en && en !== local ? `${en} (${local})` : (en || local || ""), { direction: "top" });
+          const p = f.properties;
+          const name = nameVariants({ en: p.name_en, local: p.name, hans: p.name_hans, hant: p.name_hant, country: p.country });
+          l.bindPopup(`<div class="pt">${name}</div>
+            <div class="row"><span>${p.country}</span><span class="v">${(p.daily_stops || 0).toFixed(1)} stops/day</span></div>`);
         }
       }).addTo(map);
       map.off("zoomend", zoomStationsHandler);
       map.on("zoomend", zoomStationsHandler);
     });
     railLegendCtl.update(key === "plain"
-      ? `<h4>Rail network</h4><div class="note">All high-speed rail sections across the eight economies, with no metric overlaid.</div>`
-      : discreteLegend("Trains / day", DENSITY_COLORS, ["< 100", "100 – 200", "200 – 300", "≥ 300"],
-          "Combined daily service count on each track section, merged across parallel/overlapping routes."));
+      ? `<h4>Rail network</h4>`
+      : discreteLegend("Train pairs / day", DENSITY_COLORS, ["< 100", "100 – 200", "200 – 300", "≥ 300"]));
   }
 
   else if (key === "fare") {
@@ -165,52 +257,32 @@ function setRail(key) {
         style: f => ({ color: rampColor(FARE_RAMP, f.properties.usd_per_km), weight: 3, opacity: 0.95, lineCap: "round" }),
         onEachFeature: (f, l) => {
           const p = f.properties;
-          const money = (v, cur) => v == null ? "—" : (SYM[cur] || "") + Number(v).toLocaleString("en-US");
-          const dist = p.dist_km != null ? `${p.dist_km} km` : "full line";
-          const html = `<div class="pt">${biName(p.from_en, p.from)} → ${biName(p.to_en, p.to)}</div>
-            <div class="row"><span>Line</span><span class="v">${p.country} · ${biName(p.line_en, p.line)}</span></div>
-            <div class="row"><span>Distance</span><span class="v">${dist}</span></div>
-            <div class="blk"><div class="row"><span class="v">Fare</span><span class="v">${money(p.fare_local, p.currency)}</span></div>
-            <div class="row"><span class="meth">USD / km</span><span class="meth">$${(p.usd_per_km||0).toFixed(3)}</span></div></div>`;
-          l.bindPopup(html);
-          l.on("mouseover", e => e.target.setStyle({ weight: 6 }));
-          l.on("mouseout", e => e.target.setStyle({ weight: 3 }));
+          const name = nameVariants({ en: p.line_en, local: p.line, hans: p.line_hans, hant: p.line_hant, country: p.country });
+          const rows = currencyRows(p).map(r => `<div class="row"><span>${r.label}</span><span class="v">${r.text}</span></div>`).join("");
+          l.bindTooltip(`<div class="pt">${name}</div>${rows}`, { sticky: true });
         }
       }).addTo(map);
     });
-    railLegendCtl.update(gradientLegend("Fare (US$ / km)", FARE_RAMP, [0.05,0.10,0.15,0.20,0.25,0.30], v => v.toFixed(2), ["cheaper", "pricier"]));
+    railLegendCtl.update(gradientLegend("Unit fare (US$ / km)", FARE_RAMP, [0.05,0.10,0.15,0.20,0.25,0.30], v => v.toFixed(2), ["cheaper", "pricier"]));
   }
 
   else if (key === "afford") {
     cachedFetch("affordability_gradient.geojson").then(gj => {
       railLayer = L.geoJSON(gj, {
-        interactive: false,
-        style: f => ({ color: rampColor(AFFORD_RAMP, f.properties.afford_pct), weight: 3, opacity: 0.95, lineCap: "round" })
-      }).addTo(map);
-    });
-    cachedFetch("affordability_stations.geojson").then(gj => {
-      stationLayer = L.geoJSON(gj, {
-        pointToLayer: (f, ll) => L.circleMarker(ll, { radius: 3.2, color: "#333", weight: 1, fillColor: "#fff", fillOpacity: 1 }),
-        onEachFeature: (feat, lyr) => {
-          const p = feat.properties;
-          const segs = (p.segments || []).slice().sort((a, b) => b.afford_pct - a.afford_pct)
-            .map(s => `<div class="row"><span>${biName(s.line_en, s.line) || ""}</span><span class="v" style="color:${rampColor(AFFORD_RAMP, s.afford_pct)}">${s.afford_pct.toFixed(3)}%</span></div>`).join("");
-          lyr.bindPopup(`<div class="pt">${biName(p.name_en, p.name)}</div>
-            <div class="row"><span>${p.country}</span><span class="v">${p.region || "—"}</span></div>
-            <div class="row"><span>GDP / capita</span><span class="v">${fmtUsd(p.gdp_usd)}</span></div>
-            <div class="blk">${segs || '<div class="meth">no priced segment</div>'}</div>`);
-          lyr.on("mouseover", e => e.target.setRadius(6));
-          lyr.on("mouseout", e => e.target.setRadius(3.2));
+        style: f => ({ color: rampColor(AFFORD_RAMP, f.properties.afford_pct), weight: 3, opacity: 0.95, lineCap: "round" }),
+        onEachFeature: (f, l) => {
+          l.bindTooltip(`<div class="pt">${(f.properties.afford_pct||0).toFixed(3)}<span class="unit">%</span></div>
+            <div class="row"><span>Country</span><span class="v">${f.properties.country || ""}</span></div>`, { sticky: true });
         }
       }).addTo(map);
     });
     railLegendCtl.update(gradientLegend("Affordability", AFFORD_RAMP, [0.3, 0.7, 1.0], v => v.toFixed(1) + "%",
-      ["more affordable", "less affordable"], "Cost of a 100 km trip as % of local monthly GDP per capita."));
+      ["more affordable", "less affordable"]));
   }
 }
 function zoomStationsHandler() {
   if (!stationLayer) return;
-  const stopR = z => z < 8 ? 0 : Math.min(12, 2 + 1.6 * (z - 8));
+  const stopR = z => z < 8 ? 0 : Math.min(7, 1.2 + (z - 8));
   const r = stopR(map.getZoom());
   stationLayer.eachLayer(l => l.setRadius && l.setRadius(r));
 }
@@ -231,6 +303,8 @@ document.getElementById("rail-picker").addEventListener("click", e => {
 
 setBackground("pop");
 setRail("plain");
+wireChipGroup("currency-chips", CURRENCIES, selectedCurrencies, refreshTooltips);
+wireChipGroup("language-chips", LANGUAGES, selectedLangs, refreshTooltips);
 
 // ================= station search with autocomplete =================
 let SEARCH_INDEX = null;
@@ -240,6 +314,8 @@ function loadSearchIndex() {
     SEARCH_INDEX = gj.features.map(f => ({
       en: f.properties.name_en || f.properties.name,
       local: f.properties.name,
+      hans: f.properties.name_hans,
+      hant: f.properties.name_hant,
       country: f.properties.country,
       lng: f.geometry.coordinates[0], lat: f.geometry.coordinates[1],
     }));
@@ -248,11 +324,11 @@ function loadSearchIndex() {
 }
 const searchInput = document.getElementById("station-search");
 const searchResults = document.getElementById("search-results");
-let searchMarker = null;
+let searchMarker = null, lastStation = null;
 function renderResults(items) {
   if (!items.length) { searchResults.classList.remove("open"); searchResults.innerHTML = ""; return; }
   searchResults.innerHTML = items.slice(0, 8).map((it, i) =>
-    `<div class="search-result" data-i="${i}"><span>${it.en}${it.en !== it.local ? ` <span class="sub">(${it.local})</span>` : ""}</span><span class="sub">${it.country}</span></div>`
+    `<div class="search-result" data-i="${i}"><span>${nameVariants(it)}</span><span class="sub">${it.country}</span></div>`
   ).join("");
   searchResults._items = items.slice(0, 8);
   searchResults.classList.add("open");
@@ -261,7 +337,7 @@ searchInput.addEventListener("input", () => {
   const q = searchInput.value.trim().toLowerCase();
   if (!q) { renderResults([]); return; }
   loadSearchIndex().then(idx => {
-    const matches = idx.filter(it => it.en.toLowerCase().includes(q) || it.local.toLowerCase().includes(q));
+    const matches = idx.filter(it => [it.en, it.local, it.hans, it.hant].some(s => s && s.toLowerCase().includes(q)));
     renderResults(matches);
   });
 });
@@ -275,10 +351,11 @@ document.addEventListener("click", e => {
   if (!e.target.closest(".search-wrap")) { searchResults.classList.remove("open"); }
 });
 function goToStation(it) {
+  lastStation = it;
   map.setView([it.lat, it.lng], 9);
   if (searchMarker) map.removeLayer(searchMarker);
   searchMarker = L.circleMarker([it.lat, it.lng], { radius: 8, color: "#c8312c", weight: 2, fillColor: "#fff", fillOpacity: 1 }).addTo(map);
-  searchMarker.bindPopup(`<div class="pt">${biName(it.en, it.local)}</div><div class="row"><span>${it.country}</span></div>`).openPopup();
+  searchMarker.bindPopup(`<div class="pt">${nameVariants(it)}</div><div class="row"><span>${it.country}</span></div>`).openPopup();
   searchInput.value = it.en;
   searchResults.classList.remove("open");
 }
