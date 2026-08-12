@@ -199,6 +199,28 @@ h2 {
   max-width: 68ch;
 }
 
+.construction {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.9rem;
+  padding: 1.5rem 0 2rem;
+  text-align: center;
+}
+
+.construction-art {
+  max-width: 100%;
+  height: auto;
+  border-radius: 12px;
+}
+
+.construction-text {
+  color: var(--ink-faint);
+  font-style: italic;
+  font-size: 0.92rem;
+  margin: 0;
+}
+
 .project h3 {
   font-family: "Fraunces", Georgia, serif;
   font-weight: 600;
