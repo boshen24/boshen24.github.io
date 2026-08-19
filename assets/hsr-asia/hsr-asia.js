@@ -200,7 +200,11 @@ const bgLegendCtl = legendControl({ position: "bottomleft" }).addTo(map);
 const railLegendCtl = legendControl({ position: "bottomright" }).addTo(map);
 
 // ================= rail network layer (Plain / Service density / Fare / Affordability) =================
-const DENSITY_BINS = [100, 200, 300];
+// intl_train_density.geojson's daily_trains is BIDIRECTIONAL (both directions
+// combined); the paper reports average daily TRAIN PAIRS, i.e. daily_trains / 2
+// (scripts/make_fig1_density.py PAIRS_PER_TRAINS = 0.5) — same [50,100,150] bins.
+const PAIRS_PER_TRAINS = 0.5;
+const DENSITY_BINS = [50, 100, 150];
 const DENSITY_COLORS = ["#e6b13a", "#ea580b", "#c8312c", "#4a0820"];
 const FARE_RAMP = [[0.030,"#1a9850"],[0.060,"#66bd63"],[0.110,"#fee08b"],[0.150,"#fc8d59"],
                    [0.185,"#fc4e2a"],[0.220,"#e31a1c"],[0.260,"#b10026"],[0.300,"#67001f"]];
@@ -223,11 +227,12 @@ function setRail(key) {
       railLayer = L.geoJSON({ type: "FeatureCollection", features: feats }, {
         style: f => {
           if (key === "plain") return { color: "#3a3f45", weight: 2, opacity: 0.85, lineCap: "round" };
-          let i = 0; while (i < DENSITY_BINS.length && (f.properties.daily_trains || 0) >= DENSITY_BINS[i]) i++;
+          const pairs = (f.properties.daily_trains || 0) * PAIRS_PER_TRAINS;
+          let i = 0; while (i < DENSITY_BINS.length && pairs >= DENSITY_BINS[i]) i++;
           return { color: DENSITY_COLORS[i], weight: 2.2, opacity: 0.95, lineCap: "round" };
         },
         onEachFeature: (f, l) => {
-          if (key === "density") l.bindTooltip(`${(f.properties.daily_trains || 0).toFixed(1)} train pairs/day`, { sticky: true });
+          if (key === "density") l.bindTooltip(`${((f.properties.daily_trains || 0) * PAIRS_PER_TRAINS).toFixed(1)} train pairs/day`, { sticky: true });
         }
       }).addTo(map);
     });
@@ -247,7 +252,7 @@ function setRail(key) {
     });
     railLegendCtl.update(key === "plain"
       ? `<h4>Rail network</h4>`
-      : discreteLegend("Train pairs / day", DENSITY_COLORS, ["< 100", "100 – 200", "200 – 300", "≥ 300"]));
+      : discreteLegend("Train pairs / day", DENSITY_COLORS, ["< 50", "50 – 100", "100 – 150", "≥ 150"]));
   }
 
   else if (key === "fare") {
