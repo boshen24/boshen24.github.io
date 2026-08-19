@@ -24,6 +24,7 @@ from shapely.geometry import shape, mapping
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import path_probe
+from split_by_probe import split
 from names import load_station_en, line_en, zh_variants, pinyin_name
 
 SRC = Path(path_probe.D)
@@ -81,49 +82,40 @@ def fare_names(f, p, np_):
     np_["line_hans"], np_["line_hant"] = zh_variants(ln, c)
 
 
-# ---- path-model intensity, precomputed per section -------------------------
+# ---- path-model intensity, precomputed ------------------------------------
 # The section model (daily_trains) is what Figure 1 COLOURS by; the paper's
-# printed labels instead come from the 1.5 km path probe, which is also the only
-# number the local explorer lets you read. Sampling along each section shows the
-# probe is constant over 75% of sections, so one representative (the median of
-# samples every ~5 km) is faithful. Stored BIDIRECTIONAL, like daily_trains, so
-# the front end applies the same /2 pairs conversion to both.
-def _cumkm(cs):
-    d = [0.0]
-    for a, b in zip(cs, cs[1:]):
-        la = math.radians((a[1] + b[1]) / 2)
-        d.append(d[-1] + math.hypot((b[0]-a[0]) * 111.32 * math.cos(la),
-                                    (b[1]-a[1]) * 111.32))
-    return d
-
-
-def _samples(cs, step=5.0, cap=8):
-    d = _cumkm(cs); L = d[-1]
-    if L < 1e-9:
-        return [cs[len(cs) // 2]]
-    n = max(1, min(cap, int(L // step) or 1))
-    out, j = [], 0
-    for k in range(n):
-        target = L * (k + 0.5) / n
-        while j + 1 < len(d) and d[j+1] < target:
-            j += 1
-        out.append(cs[j])
-    return out
-
-
-print("building public site data ...")
+# printed labels and the local explorer's click readout both come from the 1.5 km
+# path probe instead. That probe is a POINT measure and varies along 18.7% of the
+# merged sections, so rather than collapse a section to one figure we cut it
+# wherever the probe changes (tools/split_by_probe.py) and emit one feature per
+# constant run. Hovering then reports exactly what clicking that spot reports
+# locally. Stored BIDIRECTIONAL, like daily_trains, so the front end applies the
+# same /2 pairs conversion to both.
 print("  indexing routing model (build-time only, not shipped) ...")
 _paths, _pidw, _grid = path_probe.load()
 
 
-def density_probe(f, p, np_):
-    g = f["geometry"]
-    cs = g["coordinates"] if g["type"] == "LineString" else g["coordinates"][0]
-    vals = [path_probe.probe(P, _paths, _pidw, _grid) for P in _samples(cs)]
-    np_["path_trains"] = round(statistics.median(vals), 2)
+def _probe_at(P):
+    return round(path_probe.probe(P, _paths, _pidw, _grid), 2)
 
 
-build("intl_train_density.geojson",     ["daily_trains"], enrich=density_probe)
+def build_density(fn="intl_train_density.geojson"):
+    d = json.loads((SRC / fn).read_text(encoding="utf-8"))
+    out = []
+    for f in d["features"]:
+        dt = f["properties"].get("daily_trains")
+        for sub, val in split(f["geometry"]["coordinates"], _probe_at):
+            out.append({"type": "Feature",
+                        "properties": {"daily_trains": dt, "path_trains": val},
+                        "geometry": geom({"type": "LineString", "coordinates": sub})})
+    (DST / fn).write_text(json.dumps({"type": "FeatureCollection", "features": out},
+                                     ensure_ascii=False, separators=(",", ":")),
+                          encoding="utf-8")
+    print(f"  {fn:38s} {len(d['features']):6d} -> {len(out):6d} feats  "
+          f"{(DST/fn).stat().st_size/1e6:6.2f} MB")
+
+
+build_density()
 build("affordability_gradient.geojson", ["country", "afford_pct"])
 build("fare_segments_all.geojson",      ["country", "currency", "line", "local_per_km", "usd_per_km"],
       enrich=fare_names)
