@@ -200,9 +200,15 @@ const bgLegendCtl = legendControl({ position: "bottomleft" }).addTo(map);
 const railLegendCtl = legendControl({ position: "bottomright" }).addTo(map);
 
 // ================= rail network layer (Plain / Service density / Fare / Affordability) =================
-// intl_train_density.geojson's daily_trains is BIDIRECTIONAL (both directions
-// combined); the paper reports average daily TRAIN PAIRS, i.e. daily_trains / 2
-// (scripts/make_fig1_density.py PAIRS_PER_TRAINS = 0.5) — same [50,100,150] bins.
+// Both counts are BIDIRECTIONAL (each direction is its own train code, e.g. G1
+// and G2), so pairs = count / 2, matching the paper (make_fig1_density.py
+// PAIRS_PER_TRAINS = 0.5) over the same [50,100,150] bins.
+//   daily_trains — SECTION model: traffic on one physical track, parallel lines
+//                  merged. This is what Figure 1 colours by, so it drives colour.
+//   path_trains  — PATH model: every routed train passing within 1.5 km,
+//                  precomputed by tools/build_site_data.py. This is the number
+//                  Figure 1's printed labels use and the only figure the local
+//                  explorer lets you read, so it drives the tooltip.
 const PAIRS_PER_TRAINS = 0.5;
 const DENSITY_BINS = [50, 100, 150];
 const DENSITY_COLORS = ["#e6b13a", "#ea580b", "#c8312c", "#4a0820"];
@@ -232,7 +238,7 @@ function setRail(key) {
           return { color: DENSITY_COLORS[i], weight: 2.2, opacity: 0.95, lineCap: "round" };
         },
         onEachFeature: (f, l) => {
-          if (key === "density") l.bindTooltip(`${((f.properties.daily_trains || 0) * PAIRS_PER_TRAINS).toFixed(1)} train pairs/day`, { sticky: true });
+          if (key === "density") l.bindTooltip(`${((f.properties.path_trains || 0) * PAIRS_PER_TRAINS).toFixed(1)} train pairs/day`, { sticky: true });
         }
       }).addTo(map);
     });
